@@ -54,7 +54,7 @@ void setup() {
     display.setRotation(2);
     display.clearDisplay();
     display.display();
-    display.setTextSize(1);
+    display.setTextSize(1.5);
     display.setTextColor(SSD1306_WHITE);
 
     ledcAttach(OUT_CHANNEL_A_PIN, PWM_FREQ, PWM_RESOLUTION);
@@ -65,9 +65,8 @@ void setup() {
     Serial.printf("freq.begin()\n");
 }
 
-void loop() {
-    set_note_out(60);
-    delay(50);
+float get_frequency() {
+    freq.reset();
 
     uint32_t timeout = 0;
     while(!freq.wait() && timeout < 1000) {
@@ -77,30 +76,30 @@ void loop() {
 
     if (timeout >= 1000) {
         Serial.printf("timeout\n");
-        return;
+        return 0.0;
     }
 
-    float frequency = freq.read();
+    float result = freq.read();
+    return result;
+}
+
+void loop() {
+    float frequency[2] = {0.0, 0.0};
+    set_note_out(MIDDLE_NOTE);
+    delay(10);
+    frequency[0] = get_frequency();
+    set_note_out(MIDDLE_NOTE + 12 * 2);
+    delay(10);
+    frequency[1] = get_frequency();
 
     display.clearDisplay();
-    display.setCursor(0, 0);
-    display.print("Freq: ");
-    display.println(frequency);
+    display.setCursor(0, 10);
+    display.print(frequency[0]);
+    display.print(" ");
+    display.println(frequency[1]);
+    display.println();
+
+    display.print("ratio: ");
+    display.println(frequency[1] / frequency[0]);
     display.display();
-
-    freq.reset();
-
-    delay(20);
-
-    /*
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
-    display.println("Set note 72");
-    display.display();
-
-    set_note_out(72);
-    delay(1000);
-    */
 }
