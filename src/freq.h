@@ -7,20 +7,20 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp32-hal-cpu.h"
+#include <algorithm>
 #include <cmath>
 
+template<size_t BUFFER_SIZE>
 class FreqCapture {
 public:
-    explicit FreqCapture(int pin, int average_samples = 20)
-        : pin(pin), average_samples(average_samples) {
+    explicit FreqCapture(int pin)
+        : pin(pin) {
         last_time = 0;
-        period_accumulator = 0;
-        period_count = 0;
+        buffer_count = 0;
     }
 
     void begin() {
-        period_accumulator = 0;
-        period_count = 0;
+        buffer_count = 0;
         last_time = 0;
 
         // Настройка GPIO
@@ -38,44 +38,58 @@ public:
     }
     
     bool wait() {
-        return period_count >= average_samples;
+        return buffer_count >= BUFFER_SIZE;
     }
 
-    // Средняя частота по накопленным периодам
+    // Вычисление частоты с применением медианного фильтра
     double read() {
-        if (!wait()) return 0.0;
+        if (buffer_count < BUFFER_SIZE) return 0.0;
         
-        // Читаем значения (могут изменяться в ISR, но это безопасно для чтения)
-        uint32_t acc = period_accumulator;
-        uint32_t cnt = period_count;
+        // Копируем буфер для сортировки (ISR может продолжать писать)
+        uint32_t sorted_buffer[BUFFER_SIZE];
+        size_t count = buffer_count;
         
-        if (cnt == 0) return 0.0;
+        // Копируем данные из volatile буфера
+        for (size_t i = 0; i < count && i < BUFFER_SIZE; ++i) {
+            sorted_buffer[i] = buffer[i];
+        }
+        
+        if (count == 0) return 0.0;
+        
+        // Сортируем для медианного фильтра
+        std::sort(sorted_buffer, sorted_buffer + count);
+        
+        // Берем медиану (средний элемент)
+        uint32_t median_cycles;
+        if (count % 2 == 0) {
+            // Четное количество - берем среднее двух центральных
+            median_cycles = (sorted_buffer[count / 2 - 1] + sorted_buffer[count / 2]) / 2;
+        } else {
+            // Нечетное количество - берем центральный элемент
+            median_cycles = sorted_buffer[count / 2];
+        }
         
         // Получаем реальную частоту CPU в МГц
         uint32_t cpu_freq_mhz = getCpuFrequencyMhz();
         
-        // Конвертируем циклы в микросекунды
-        // cpu_freq_mhz МГц = cpu_freq_mhz циклов на микросекунду
-        double mean_period_cycles = (double)acc / (double)cnt;
-        
         // Фильтруем слишком большие периоды (больше 1 сек)
         uint64_t max_cycles = (uint64_t)cpu_freq_mhz * 1000000ULL;
-        if (mean_period_cycles > (double)max_cycles) {
+        if (median_cycles > max_cycles) {
             return 0.0;
         }
         
-        double mean_period_us = mean_period_cycles / (double)cpu_freq_mhz;
+        // Конвертируем циклы в микросекунды
+        double median_period_us = (double)median_cycles / (double)cpu_freq_mhz;
         
         // Конвертируем микросекунды в секунды и вычисляем частоту
-        double mean_period_sec = mean_period_us / 1000000.0;
-        double frequency = (mean_period_sec > 0) ? (1.0 / mean_period_sec) : 0.0;
+        double median_period_sec = median_period_us / 1000000.0;
+        double frequency = (median_period_sec > 0) ? (1.0 / median_period_sec) : 0.0;
         
         return frequency;
     }
 
     void reset() {
-        period_accumulator = 0;
-        period_count = 0;
+        buffer_count = 0;
         last_time = 0;
     }
 
@@ -94,19 +108,16 @@ private:
             
             // Фильтруем слишком короткие периоды (защита от шума)
             // Минимум 80 циклов (1 мкс при 80 МГц)
-            // Максимум не проверяем в ISR для избежания проблем с литералами
-            // Большие периоды отфильтруются при чтении
             if (period_cycles >= 80) {
-                // Накопление в циклах, конвертацию делаем в read()
-                // Используем явные присваивания для volatile переменных
-                uint32_t period_cycles_32 = (uint32_t)period_cycles;
-                uint32_t acc = self->period_accumulator;
-                acc = acc + period_cycles_32;
-                self->period_accumulator = acc;
-                
-                uint32_t cnt = self->period_count;
-                cnt = cnt + 1;
-                self->period_count = cnt;
+                // Добавляем в буфер, если есть место
+                size_t idx = self->buffer_count;
+                if (idx < BUFFER_SIZE) {
+                    self->buffer[idx] = (uint32_t)period_cycles;
+                    // Увеличиваем счетчик атомарно
+                    size_t new_count = idx + 1;
+                    self->buffer_count = new_count;
+                }
+                // Если буфер полон, просто не добавляем новые элементы
             }
         }
         
@@ -115,9 +126,8 @@ private:
 
 private:
     int         pin;
-    const int   average_samples;
     
     volatile uint64_t last_time = 0;
-    volatile uint32_t period_accumulator = 0;  // Накопление в циклах CPU
-    volatile uint32_t period_count = 0;
+    volatile uint32_t buffer[BUFFER_SIZE];  // Буфер периодов в циклах CPU
+    volatile size_t buffer_count = 0;        // Количество элементов в буфере
 };

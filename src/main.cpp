@@ -14,12 +14,12 @@
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
 
-#define OUT_CHANNEL_A_PIN 13
-#define PWM_FREQ 8192
+#define OUT_CHANNEL_A_PIN 26
+#define PWM_FREQ 65536
 #define PWM_RESOLUTION 10
 const uint32_t PWM_MAX_VAL = (1 << PWM_RESOLUTION) - 1;
 
-const int ADC_0 = 12;
+const int ADC_0 = 36;
 
 static constexpr float PWM_NOTE_SCALE = (1 << PWM_RESOLUTION) / (12 * 10.99); // 10.99 Vpp, 12 notes per octave (1 V/oct)
 static const int PWM_ZERO_OFFSET = 498; // 0 V at MIDDLE_NOTE
@@ -28,7 +28,7 @@ static const int MIDDLE_NOTE = 60; // C4 (middle C)
 // Create display object
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-FreqCapture freq(ADC_0);
+FreqCapture<7> freq(ADC_0);  // Буфер на 64 периода
 
 void set_note_out(uint8_t note) {
     int v = (note - MIDDLE_NOTE) * PWM_NOTE_SCALE + PWM_ZERO_OFFSET;
@@ -39,8 +39,8 @@ void set_note_out(uint8_t note) {
 
 
 void setup() {
-    // pinMode(12, OUTPUT);
-    // pinMode(13, OUTPUT);
+    pinMode(12, OUTPUT);
+    pinMode(13, OUTPUT);
 
     Serial.begin(115200);
 
