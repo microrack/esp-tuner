@@ -23,7 +23,7 @@ public:
         buffer_count = 0;
         last_time = 0;
 
-        // Настройка GPIO
+        // GPIO configuration
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << pin);
         io_conf.mode = GPIO_MODE_INPUT;
@@ -32,7 +32,7 @@ public:
         io_conf.intr_type = GPIO_INTR_POSEDGE;
         ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-        // Установка обработчика прерывания
+        // Set interrupt handler
         gpio_install_isr_service(0);
         gpio_isr_handler_add((gpio_num_t)pin, gpio_isr_handler, this);
     }
@@ -41,47 +41,47 @@ public:
         return buffer_count >= BUFFER_SIZE;
     }
 
-    // Вычисление частоты с применением медианного фильтра
+    // Calculate frequency using median filter
     double read() {
         if (buffer_count < BUFFER_SIZE) return 0.0;
         
-        // Копируем буфер для сортировки (ISR может продолжать писать)
+        // Copy buffer for sorting (ISR may continue writing)
         uint32_t sorted_buffer[BUFFER_SIZE];
         size_t count = buffer_count;
         
-        // Копируем данные из volatile буфера
+        // Copy data from volatile buffer
         for (size_t i = 0; i < count && i < BUFFER_SIZE; ++i) {
             sorted_buffer[i] = buffer[i];
         }
         
         if (count == 0) return 0.0;
         
-        // Сортируем для медианного фильтра
+        // Sort for median filter
         std::sort(sorted_buffer, sorted_buffer + count);
         
-        // Берем медиану (средний элемент)
+        // Take median (middle element)
         uint32_t median_cycles;
         if (count % 2 == 0) {
-            // Четное количество - берем среднее двух центральных
+            // Even count - take average of two central elements
             median_cycles = (sorted_buffer[count / 2 - 1] + sorted_buffer[count / 2]) / 2;
         } else {
-            // Нечетное количество - берем центральный элемент
+            // Odd count - take central element
             median_cycles = sorted_buffer[count / 2];
         }
         
-        // Получаем реальную частоту CPU в МГц
+        // Get actual CPU frequency in MHz
         uint32_t cpu_freq_mhz = getCpuFrequencyMhz();
         
-        // Фильтруем слишком большие периоды (больше 1 сек)
+        // Filter out periods that are too large (more than 1 sec)
         uint64_t max_cycles = (uint64_t)cpu_freq_mhz * 1000000ULL;
         if (median_cycles > max_cycles) {
             return 0.0;
         }
         
-        // Конвертируем циклы в микросекунды
+        // Convert cycles to microseconds
         double median_period_us = (double)median_cycles / (double)cpu_freq_mhz;
         
-        // Конвертируем микросекунды в секунды и вычисляем частоту
+        // Convert microseconds to seconds and calculate frequency
         double median_period_sec = median_period_us / 1000000.0;
         double frequency = (median_period_sec > 0) ? (1.0 / median_period_sec) : 0.0;
         
@@ -94,30 +94,30 @@ public:
     }
 
 private:
-    // Обработчик прерывания GPIO
+    // GPIO interrupt handler
     static void IRAM_ATTR gpio_isr_handler(void* arg) {
         FreqCapture* self = static_cast<FreqCapture*>(arg);
         if (!self) return;
 
-        // Получаем текущее время в циклах CPU (работает в IRAM)
+        // Get current time in CPU cycles (runs in IRAM)
         uint64_t current_cycles = esp_cpu_get_cycle_count();
         
         if (self->last_time > 0) {
-            // Вычисляем период между прерываниями в циклах
+            // Calculate period between interrupts in cycles
             uint64_t period_cycles = current_cycles - self->last_time;
             
-            // Фильтруем слишком короткие периоды (защита от шума)
-            // Минимум 80 циклов (1 мкс при 80 МГц)
+            // Filter out periods that are too short (noise protection)
+            // Minimum 80 cycles (1 μs at 80 MHz)
             if (period_cycles >= 80) {
-                // Добавляем в буфер, если есть место
+                // Add to buffer if there's space
                 size_t idx = self->buffer_count;
                 if (idx < BUFFER_SIZE) {
                     self->buffer[idx] = (uint32_t)period_cycles;
-                    // Увеличиваем счетчик атомарно
+                    // Increment counter atomically
                     size_t new_count = idx + 1;
                     self->buffer_count = new_count;
                 }
-                // Если буфер полон, просто не добавляем новые элементы
+                // If buffer is full, simply don't add new elements
             }
         }
         
@@ -128,6 +128,6 @@ private:
     int         pin;
     
     volatile uint64_t last_time = 0;
-    volatile uint32_t buffer[BUFFER_SIZE];  // Буфер периодов в циклах CPU
-    volatile size_t buffer_count = 0;        // Количество элементов в буфере
+    volatile uint32_t buffer[BUFFER_SIZE];  // Buffer of periods in CPU cycles
+    volatile size_t buffer_count = 0;        // Number of elements in buffer
 };

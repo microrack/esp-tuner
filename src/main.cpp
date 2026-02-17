@@ -28,7 +28,7 @@ static const int MIDDLE_NOTE = 60; // C4 (middle C)
 // Create display object
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-FreqCapture<7> freq(ADC_0);  // Буфер на 64 периода
+FreqCapture<7> freq(ADC_0);  // Buffer for periods
 
 void set_note_out(uint8_t note) {
     int v = (note - MIDDLE_NOTE) * PWM_NOTE_SCALE + PWM_ZERO_OFFSET;
